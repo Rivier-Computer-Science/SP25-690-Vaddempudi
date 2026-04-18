@@ -63,3 +63,10 @@ class CNNFeatureExtractor(nn.Module):
         return self.model(x)
 
 cnn_model = CNNFeatureExtractor().to(device)
+
+vit_model = timm.create_model('vit_base_patch16_224', pretrained=True)
+vit_model.reset_classifier(0)
+vit_model = vit_model.to(device)
+vit_model.eval()
+
+print("ViT ready")
