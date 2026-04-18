@@ -42,3 +42,24 @@ train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
 print("Data ready with leakage")
+
+class CNNFeatureExtractor(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.model = nn.Sequential(
+            nn.Conv2d(3,32,3,padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+
+            nn.Conv2d(32,64,3,padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+
+            nn.Flatten(),
+            nn.Linear(64*56*56,128)
+        )
+
+    def forward(self, x):
+        return self.model(x)
+
+cnn_model = CNNFeatureExtractor().to(device)
