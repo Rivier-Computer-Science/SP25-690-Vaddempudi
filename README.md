@@ -59,3 +59,27 @@ Detecting data leakage is very important because it affects how we trust machine
 10. Project Feasibility
 
 This project is practical and can be completed within the course time. It uses standard datasets and well-known deep learning models. The implementation can be done using tools like PyTorch and can run on platforms like Google Colab. The work can be done step by step, starting from simple methods and then moving to more advanced ones. This makes the project manageable while still allowing meaningful results.
+
+## Why This Project Matters
+In many projects the train and test sets have overlapping or very similar images by mistake. This data leakage makes accuracy look very high even when the model has not learned anything useful. This project builds a system that automatically finds such leakage using deep features from CNN and Vision Transformer.
+
+## What the System Does
+It extracts representations from images in train and test sets, calculates cosine similarity, and uses a small neural network to decide if leakage is present. It can catch both exact copies and near-duplicate images.
+
+## Dataset Used
+Fashion-MNIST (10 classes of clothing items). We create three versions: clean split with no leakage, exact leakage, and near-leakage with small changes like flip or rotation.
+
+## Models
+- Convolutional feature extractor + detector head
+- Vision Transformer feature extractor + detector head
+- Simple baseline using image hash comparison
+
+## How to Run
+1. pip install -r requirements.txt
+2. python runner_scripts/create_leak_versions.py
+3. python runner_scripts/pull_representations.py
+4. python runner_scripts/train_detector_conv.py
+5. python runner_scripts/train_detector_transformer.py
+6. python runner_scripts/simple_hash_baseline.py
+
+All outputs go to the saved_results folder.
