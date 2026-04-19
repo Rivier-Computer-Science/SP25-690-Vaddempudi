@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoade!r, Dataset
 import timm
 import numpy as np
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
@@ -41,4 +41,4 @@ train_dataset, test_dataset = create_leakage(train_dataset, test_dataset, 0.2)
 train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
-print("Data ready with leakage")
+print("Data ready with leakage"
