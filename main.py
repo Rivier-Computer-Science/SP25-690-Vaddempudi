@@ -1,4 +1,3 @@
-# Install dependencies
 import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
@@ -15,191 +14,140 @@ from sklearn.metrics import roc_curve, auc, confusion_matrix, ConfusionMatrixDis
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
-
-from torch.utils.data import Subset
-
 transform = transforms.Compose([
-    transforms.Resize((224, 224)),
+    transforms.Resize((224,224)),
     transforms.ToTensor()
 ])
 
-train_dataset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
-test_dataset = datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
+train_dataset = datasets.CIFAR10(root="./data", train=True, download=True, transform=transform)
+test_dataset = datasets.CIFAR10(root="./data", train=False, download=True, transform=transform)
 
 def create_leakage(train, test, ratio=0.2):
-    num_leak = int(len(test) * ratio)
-    indices = random.sample(range(len(train)), num_leak)
+    num = int(len(test)*ratio)
+    idxs = random.sample(range(len(train)), num)
 
-    for i, idx in enumerate(indices):
+    for i, idx in enumerate(idxs):
         test.data[i] = train.data[idx]
         test.targets[i] = train.targets[idx]
 
     return train, test
 
-train_dataset, test_dataset = create_leakage(train_dataset, test_dataset, 0.2)
+train_dataset, test_dataset = create_leakage(train_dataset, test_dataset)
 
-# ✅ SMALL SUBSETS (FAST)
 train_subset = Subset(train_dataset, list(range(2000)))
 test_subset = Subset(test_dataset, list(range(500)))
 
 train_loader = DataLoader(train_subset, batch_size=64, shuffle=True)
 test_loader = DataLoader(test_subset, batch_size=64, shuffle=False)
 
-print("Data ready (FAST MODE)")
+cnn_model = timm.create_model("resnet18", pretrained=True)
+cnn_model.fc = nn.Identity()   # 🔥 key fix
+cnn_model = cnn_model.to(device)
 
-class CNNFeatureExtractor(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.model = nn.Sequential(
-            nn.Conv2d(3,32,3,padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-
-            nn.Conv2d(32,64,3,padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-
-            nn.Flatten(),
-            nn.Linear(64*56*56,64)  # reduced size
-        )
-
-    def forward(self, x):
-        return self.model(x)
-
-cnn_model = CNNFeatureExtractor().to(device)
-
-
-vit_model = timm.create_model('vit_tiny_patch16_224', pretrained=True)
-vit_model.reset_classifier(0)
+vit_model = timm.create_model("vit_tiny_patch16_224", pretrained=True)
+vit_model.reset_classifier(0)  # feature mode
 vit_model = vit_model.to(device)
-vit_model.eval()
+def train(model, loader, epochs=2):
+    model.train()
+    opt = torch.optim.Adam(model.parameters(), lr=1e-4)
+    loss_fn = nn.CrossEntropyLoss()
 
-print("Tiny ViT ready")
+    for e in range(epochs):
+        total = 0
+        for x,y in loader:
+            x,y = x.to(device), y.to(device)
 
-def extract_features(model, loader):
+            opt.zero_grad()
+            out = model(x)
+            loss = loss_fn(out,y)
+            loss.backward()
+            opt.step()
+
+            total += loss.item()
+
+        print("Epoch", e+1, "Loss:", total)
+
+print("CNN Training")
+train(cnn_model, train_loader)
+
+print("ViT Training")
+train(vit_model, train_loader)
+def extract(model, loader):
     model.eval()
-    features = []
+    feats = []
 
     with torch.no_grad():
-        for images, _ in loader:
-            images = images.to(device)
-            feats = model(images)
-            features.append(feats.cpu().numpy())
+        for x,_ in loader:
+            x = x.to(device)
 
-    return np.vstack(features)
+            if "vit" in str(type(model)):
+                f = model.forward_features(x)   # 🔥 FIX
+                f = f[:,0]  # CLS token
+            else:
+                f = model(x)
 
-print("Extracting CNN features...")
-cnn_train = extract_features(cnn_model, train_loader)
-cnn_test = extract_features(cnn_model, test_loader)
+            feats.append(f.cpu().numpy())
 
-print("Extracting ViT features...")
-vit_train = extract_features(vit_model, train_loader)
-vit_test = extract_features(vit_model, test_loader)
+    return np.vstack(feats)
 
-def compute_similarity(train_f, test_f):
-    sim = cosine_similarity(test_f, train_f)
-    return sim.max(axis=1)
+cnn_train = extract(cnn_model, train_loader)
+cnn_test = extract(cnn_model, test_loader)
 
-cnn_sim = compute_similarity(cnn_train, cnn_test)
-vit_sim = compute_similarity(vit_train, vit_test)
+vit_train = extract(vit_model, train_loader)
+vit_test = extract(vit_model, test_loader)
+
+def norm(x):
+    return x / np.linalg.norm(x, axis=1, keepdims=True)
+
+cnn_train = norm(cnn_train)
+cnn_test = norm(cnn_test)
+
+vit_train = norm(vit_train)
+vit_test = norm(vit_test)
+
+def similarity(train_f, test_f):
+    return cosine_similarity(test_f, train_f).max(axis=1)
+
+cnn_sim = similarity(cnn_train, cnn_test)
+vit_sim = similarity(vit_train, vit_test)
 
 labels = np.zeros(len(test_subset))
-labels[:int(0.2 * len(test_subset))] = 1
+labels[:int(0.2*len(test_subset))] = 1
 
-def evaluate(sim, labels, threshold=0.9):
-    preds = (sim > threshold).astype(int)
+def best_threshold(sim, labels):
+    best_t, best_f1 = 0, 0
 
-    print("Accuracy:", accuracy_score(labels, preds))
-    print("Precision:", precision_score(labels, preds))
-    print("Recall:", recall_score(labels, preds))
-    print("F1:", f1_score(labels, preds))
+    for t in np.linspace(0.5,0.99,50):
+        pred = (sim>t).astype(int)
+        f1 = f1_score(labels,pred)
+        if f1 > best_f1:
+            best_f1 = f1
+            best_t = t
 
-print("=== CNN RESULTS ===")
-evaluate(cnn_sim, labels)
+    return best_t
 
-print("\n=== ViT RESULTS ===")
-evaluate(vit_sim, labels)
+cnn_t = best_threshold(cnn_sim, labels)
+vit_t = best_threshold(vit_sim, labels)
 
-import matplotlib.pyplot as plt
+def evaluate(sim, labels, t):
+    pred = (sim>t).astype(int)
 
-def plot_similarity(sim, labels, title):
-    leaked = sim[labels == 1]
-    clean = sim[labels == 0]
+    print("Accuracy:", accuracy_score(labels,pred))
+    print("Precision:", precision_score(labels,pred))
+    print("Recall:", recall_score(labels,pred))
+    print("F1:", f1_score(labels,pred))
 
-    plt.figure()
+print("CNN")
+evaluate(cnn_sim, labels, cnn_t)
 
-    plt.hist(
-        leaked,
-        bins=30,
-        alpha=0.6,
-        label="Leaked",
-        color='red',
-        edgecolor='black'
-    )
+print("\nViT")
+evaluate(vit_sim, labels, vit_t)
 
-    plt.hist(
-        clean,
-        bins=30,
-        alpha=0.6,
-        label="Clean",
-        color='dodgerblue',
-        edgecolor='black'
-    )
+fpr, tpr, _ = roc_curve(labels, vit_sim)
+auc_score = auc(fpr,tpr)
 
-    plt.title(title)
-    plt.xlabel("Cosine Similarity")
-    plt.ylabel("Count")
-    plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.4)
-    plt.show()
-
-plot_similarity(cnn_sim, labels, "CNN Similarity Distribution")
-plot_similarity(vit_sim, labels, "ViT Similarity Distribution")
-
-
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-
-def plot_confusion(sim, labels, threshold=0.9, title="Confusion Matrix"):
-    preds = (sim > threshold).astype(int)
-    cm = confusion_matrix(labels, preds)
-
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm)
-    disp.plot(cmap='Blues')  # strong contrast blue scale
-
-    plt.title(title)
-    plt.grid(False)
-    plt.show()
-
-plot_confusion(cnn_sim, labels, title="CNN Confusion Matrix")
-plot_confusion(vit_sim, labels, title="ViT Confusion Matrix")
-
-from sklearn.metrics import roc_curve, auc
-
-def plot_roc(sim, labels, title):
-    fpr, tpr, _ = roc_curve(labels, sim)
-    roc_auc = auc(fpr, tpr)
-
-    plt.figure()
-
-    plt.plot(
-        fpr, tpr,
-        color='red',
-        linewidth=2,
-        label=f"AUC = {roc_auc:.2f}"
-    )
-
-    plt.plot(
-        [0, 1], [0, 1],
-        color='black',
-        linestyle='--'
-    )
-
-    plt.xlabel("False Positive Rate")
-    plt.ylabel("True Positive Rate")
-    plt.title(title)
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.show()
-
-plot_roc(cnn_sim, labels, "CNN ROC Curve")
-plot_roc(vit_sim, labels, "ViT ROC Curve")
+plt.plot(fpr,tpr,label=f"AUC={auc_score:.2f}")
+plt.plot([0,1],[0,1],"--")
+plt.legend()
+plt.title("ROC Curve")
+plt.show()
