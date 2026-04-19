@@ -1,0 +1,22 @@
+dataset:
+  root: ./data_fashion
+  batch_size: 128
+  num_workers: 4
+
+extractor:
+  conv_dim: 512
+  transformer_dim: 384
+  img_size: 28
+
+leak_settings:
+  exact_percent: 0.08
+  near_percent: 0.08
+
+training:
+  epochs: 15
+  lr: 0.001
+  seed: 42
+  device: cuda
+
+detector:
+  hidden_units: 96
