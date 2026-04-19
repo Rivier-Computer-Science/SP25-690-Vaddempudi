@@ -1,16 +1,17 @@
 # Install dependencies
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Subset
 import timm
 import numpy as np
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-from sklearn.metrics.pairwise import cosine_similarity
 import random
 import matplotlib.pyplot as plt
+
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import roc_curve, auc, confusion_matrix, ConfusionMatrixDisplay
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
