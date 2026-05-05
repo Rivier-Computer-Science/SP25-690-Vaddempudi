@@ -1,7 +1,9 @@
-import torch
-import torch.nn.functional as F
+import numpy as np
+from utils import cosine_similarity
 
-def get_highest_similarity(test_reps, train_reps):
-    sims = F.cosine_similarity(test_reps.unsqueeze(1), train_reps.unsqueeze(0), dim=2)
-    highest, _ = sims.max(dim=1)
-    return highest
+def compute_similarity(train_feats, test_feats):
+    sims = []
+    for t in test_feats:
+        sim = cosine_similarity(train_feats, t.reshape(1,-1))
+        sims.append(np.max(sim))
+    return np.array(sims)
