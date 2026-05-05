@@ -1,85 +1,185 @@
-# SP25-690-Vaddempudi
-Detecting Data Leakage in Deep Learning Using CNN and Vision Transformer Representations
- 
+# Detecting Data Leakage in Deep Learning Using CNN and Vision Transformer Representations
 
-1. Why This Problem Matters
+**Name:** Bhavya Lahari Vaddempudi
 
-In deep learning, we usually assume that the training data and test data are completely separate. But in real cases, this is not always true. Sometimes, the same or very similar samples appear in both sets. This is called data leakage. Because of this, models can show very high accuracy even though they are not really learning properly. This creates a false idea of good performance. Also, it is not easy to find this problem manually. So in this project, the idea is to build a deep learning–based system that can automatically detect if such leakage is present. This will help make model evaluation more reliable and trustworthy.
+---
 
- 
+## Project Overview
 
-2. What the System Will Do
+This project focuses on detecting data leakage in deep learning datasets. Data leakage happens when similar or identical samples appear in both training and test sets, which leads to misleadingly high accuracy.
 
-The main goal of this project is to check whether a dataset split has leakage or not. The model will take samples from both training and test sets as input and give an output saying whether leakage exists. It can also give a confidence score showing how likely leakage is. The system should be able to detect both exact duplicates and slightly changed (near-duplicate) samples. The performance will be measured using accuracy, precision, recall, and F1-score. A good result means the model can correctly detect even small or hidden leakage.
+The system uses deep learning representations from CNN and Vision Transformer models to identify both exact duplicates and near-duplicate samples. A similarity-based detection approach is used to classify whether leakage exists.
 
- 
+---
 
-3. Data and How It Will Be Prepared
+## Key Idea
 
-This project will use a standard dataset like CIFAR-10. To test the system properly, we will create different versions of the dataset. Some versions will have no leakage, while others will have controlled leakage. This includes copying exact images into both training and test sets, and also creating similar images using small changes like noise, rotation, or cropping. Different levels of leakage will be created so we can test how well the model performs in each case. Proper separation will be maintained so experiments are fair and controlled.
+Instead of comparing raw images directly, this project:
 
- 
+* Extracts feature representations using CNN and Vision Transformer
+* Computes similarity between train and test samples
+* Uses a small neural network to detect leakage
 
-4. How the Model Will Be Built
+This allows detection of subtle leakage cases where images are slightly modified.
 
-This project will use two deep learning models from the course: a Convolutional Neural Network (CNN) and a Vision Transformer (ViT). Both models will be trained to learn features (representations) from images. After that, these features will be compared between training and test samples using similarity measures like cosine similarity. Then, a small neural network (like an MLP) will take these similarity values and predict whether leakage is present. By comparing CNN and transformer features, we can understand which type of model is better at identifying overlap between datasets.
+---
 
- 
+## Dataset
 
-5. How It Will Be Compared with Other Methods
+* Dataset used: Fashion-MNIST
+* Total classes: 10
 
-To check if the proposed method is useful, it will be compared with simple approaches. These include random guessing and basic duplicate checking using raw image comparison. The CNN-based model will act as a main baseline, and the Vision Transformer will be used as a more advanced comparison model. This will help us see whether better feature learning leads to better leakage detection.
+Three dataset versions are created:
 
- 
+* Clean dataset (no leakage)
+* Exact leakage (same images in train and test)
+* Near leakage (images with small transformations like rotation, flip, noise)
 
-6. How Experiments Will Be Done
+---
 
-Different dataset versions with different leakage levels will be used for experiments. The models will be trained using standard methods like Adam optimizer. A validation set will be used to tune parameters. Testing will be done on separate data to measure final performance. Experiments will be repeated multiple times to make sure results are stable. We will also carefully change one factor at a time (like model type or leakage level) to understand its effect clearly.
+## Models Used
 
- 
+1. CNN-based feature extractor
+2. Vision Transformer (ViT) feature extractor
+3. MLP-based leakage detector
+4. Baseline method using simple hash comparison
 
-7. What Results We Expect
+---
 
-Simple methods will likely work only when there are exact duplicate images. But they may fail when the images are slightly different. The deep learning models should perform better in these cases because they can learn deeper patterns. The Vision Transformer might perform better in some cases because it captures global information. Results will be shown using tables and graphs to clearly compare performance under different conditions.
+## Project Structure
 
- 
+```
+data_builder/
+    leak_creator.py
 
-8. Where the Model Might Fail
+rep_extractors/
+    conv_extractor.py
+    transformer_extractor.py
 
-The model may sometimes confuse very similar but different images as leakage, leading to false positives. It may also miss leakage if the duplicate images are heavily modified. Another issue is that the model’s performance depends on how well it learns features. These problems will be studied by looking at wrong predictions and understanding why they happened.
+leak_detector/
+    detector_head.py
+    sim_calculator.py
 
- 
+runner_scripts/
+    create_leak_versions.py
+    pull_representations.py
+    train_detector_conv.py
+    train_detector_transformer.py
+    simple_hash_baseline.py
 
-9. Ethical and Practical Considerations
+main.py
+config.yaml
+utils.py
+requirements.txt
+README.md
+```
 
-Detecting data leakage is very important because it affects how we trust machine learning results. If leakage is not found, models may look better than they actually are. However, automatic systems are not perfect, and wrong decisions may also happen. So results should always be checked carefully. Clear reporting and honest evaluation are important to use such systems responsibly.
+---
 
- 
+## How to Run the Project
 
-10. Project Feasibility
+Step 1: Install dependencies
 
-This project is practical and can be completed within the course time. It uses standard datasets and well-known deep learning models. The implementation can be done using tools like PyTorch and can run on platforms like Google Colab. The work can be done step by step, starting from simple methods and then moving to more advanced ones. This makes the project manageable while still allowing meaningful results.
+```
+pip install -r requirements.txt
+```
 
-## Why This Project Matters
-In many projects the train and test sets have overlapping or very similar images by mistake. This data leakage makes accuracy look very high even when the model has not learned anything useful. This project builds a system that automatically finds such leakage using deep features from CNN and Vision Transformer.
+Step 2: Create dataset with leakage
 
-## What the System Does
-It extracts representations from images in train and test sets, calculates cosine similarity, and uses a small neural network to decide if leakage is present. It can catch both exact copies and near-duplicate images.
+```
+python runner_scripts/create_leak_versions.py
+```
 
-## Dataset Used
-Fashion-MNIST (10 classes of clothing items). We create three versions: clean split with no leakage, exact leakage, and near-leakage with small changes like flip or rotation.
+Step 3: Extract representations
 
-## Models
-- Convolutional feature extractor + detector head
-- Vision Transformer feature extractor + detector head
-- Simple baseline using image hash comparison
+```
+python runner_scripts/pull_representations.py
+```
 
-## How to Run
-1. pip install -r requirements.txt
-2. python runner_scripts/create_leak_versions.py
-3. python runner_scripts/pull_representations.py
-4. python runner_scripts/train_detector_conv.py
-5. python runner_scripts/train_detector_transformer.py
-6. python runner_scripts/simple_hash_baseline.py
+Step 4: Train CNN-based detector
 
-All outputs go to the saved_results folder.
+```
+python runner_scripts/train_detector_conv.py
+```
+
+Step 5: Train Transformer-based detector
+
+```
+python runner_scripts/train_detector_transformer.py
+```
+
+Step 6: Run baseline method
+
+```
+python runner_scripts/simple_hash_baseline.py
+```
+
+Step 7: Run full pipeline
+
+```
+python main.py
+```
+
+---
+
+## Outputs Generated
+
+After running the project, the following outputs will be created:
+
+* Confusion matrices for both models
+* Training and validation accuracy graphs
+* Model comparison chart
+* Performance metrics (accuracy, precision, recall, F1-score)
+
+---
+
+## Evaluation Metrics
+
+The system is evaluated using:
+
+* Accuracy
+* Precision
+* Recall
+* F1-score
+
+These metrics help measure how well the system detects leakage.
+
+---
+
+## Results Summary
+
+* Baseline method works only for exact duplicates
+* CNN model improves detection using learned features
+* Vision Transformer performs best, especially for near-duplicate cases
+
+---
+
+## Limitations
+
+* May produce false positives for very similar images
+* Performance depends on quality of feature extraction
+* Dataset is controlled and may not fully reflect real-world scenarios
+
+---
+
+## Reproducibility
+
+This project is fully reproducible:
+
+* All code is included
+* No hidden steps
+* Clear execution commands provided
+* Same results can be reproduced using the given scripts
+
+---
+
+## Requirements
+
+See `requirements.txt` for full dependency list.
+
+---
+
+## Final Note
+
+This project demonstrates how deep learning can be used not just for prediction tasks, but also for improving data quality and ensuring reliable model evaluation.
+
