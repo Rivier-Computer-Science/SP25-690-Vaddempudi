@@ -1,31 +1,30 @@
 import torch
-import yaml
-from rep_extractors.conv_extractor import ConvExtractor
-from leak_detector.sim_calculator import get_highest_similarity
-from leak_detector.detector_head import LeakDetectorHead
+from torch.utils.data import TensorDataset, DataLoader
+import torch.nn as nn
+import torch.optim as optim
+from leak_detector.detector_head import LeakDetector
 
-with open('config.yaml') as f:
-    cfg = yaml.safe_load(f)
+def train_detector(sim, labels):
+    x = torch.tensor(sim).float().unsqueeze(1)
+    y = torch.tensor(labels).long()
+    ds = TensorDataset(x,y)
+    dl = DataLoader(ds, batch_size=32, shuffle=True)
 
-device = torch.device(cfg['training']['device'] if torch.cuda.is_available() else "cpu")
+    model = LeakDetector()
+    opt = optim.Adam(model.parameters(), lr=1e-3)
+    loss_fn = nn.CrossEntropyLoss()
 
-train_reps = torch.load('saved_results/conv_train_reps.pth').to(device)
-test_reps = torch.load('saved_results/conv_train_reps.pth').to(device)   
-
-highest_sim = get_highest_similarity(test_reps, train_reps).unsqueeze(1)
-labels = torch.randint(0, 2, (len(highest_sim),))   
-
-model = LeakDetectorHead().to(device)
-opt = torch.optim.Adam(model.parameters(), lr=cfg['training']['lr'])
-loss_fn = torch.nn.CrossEntropyLoss()
-
-for ep in range(cfg['training']['epochs']):
-    opt.zero_grad()
-    preds = model(highest_sim)
-    loss = loss_fn(preds, labels)
-    loss.backward()
-    opt.step()
-    print(f"Epoch {ep+1} Loss: {loss.item():.4f}")
-
-torch.save(model.state_dict(), 'saved_results/conv_detector.pth')
-print("Conv based detector trained.")
+    history = []
+    for epoch in range(10):
+        correct = 0
+        for xb,yb in dl:
+            out = model(xb)
+            loss = loss_fn(out,yb)
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+            pred = out.argmax(1)
+            correct += (pred==yb).sum().item()
+        acc = correct/len(ds)
+        history.append(acc)
+    return model, history
