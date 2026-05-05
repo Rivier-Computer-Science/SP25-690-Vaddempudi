@@ -1,205 +1,63 @@
-# Install dependencies
 import torch
-import torch.nn as nn
-import torchvision.transforms as transforms
-import torchvision.datasets as datasets
-from torch.utils.data import DataLoader, Subset
-import timm
-import numpy as np
-import random
-import matplotlib.pyplot as plt
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader
+from utils import *
+from data_builder.leak_creator import *
+from rep_extractors.conv_extractor import ConvExtractor
+from rep_extractors.transformer_extractor import TransformerExtractor
+from leak_detector.sim_calculator import compute_similarity
+from runner_scripts.train_detector_conv import train_detector
+from runner_scripts.simple_hash_baseline import hash_baseline
+from runner_scripts.pull_representations import extract
 
-from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-from sklearn.metrics import roc_curve, auc, confusion_matrix, ConfusionMatrixDisplay
+set_seed()
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(device)
+transform = transforms.Compose([transforms.ToTensor()])
 
-from torch.utils.data import Subset
+train_data = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
+test_data = datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
 
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor()
-])
+X_train = train_data.data.astype('float32')/255
+X_test = test_data.data.astype('float32')/255
+y_train = train_data.targets
+y_test = test_data.targets
 
-train_dataset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
-test_dataset = datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
+X_train, X_test, y_train, y_test, labels = create_leak_dataset(X_train, X_test, y_train, y_test)
 
-def create_leakage(train, test, ratio=0.2):
-    num_leak = int(len(test) * ratio)
-    indices = random.sample(range(len(train)), num_leak)
+train_loader = DataLoader(train_data, batch_size=64)
+test_loader = DataLoader(test_data, batch_size=64)
 
-    for i, idx in enumerate(indices):
-        test.data[i] = train.data[idx]
-        test.targets[i] = train.targets[idx]
+conv = ConvExtractor()
+trans = TransformerExtractor()
 
-    return train, test
+train_feats_conv = extract(conv, train_loader)
+test_feats_conv = extract(conv, test_loader)
 
-train_dataset, test_dataset = create_leakage(train_dataset, test_dataset, 0.2)
+train_feats_trans = extract(trans, train_loader)
+test_feats_trans = extract(trans, test_loader)
 
-# ✅ SMALL SUBSETS (FAST)
-train_subset = Subset(train_dataset, list(range(2000)))
-test_subset = Subset(test_dataset, list(range(500)))
+sim_conv = compute_similarity(train_feats_conv, test_feats_conv)
+sim_trans = compute_similarity(train_feats_trans, test_feats_trans)
 
-train_loader = DataLoader(train_subset, batch_size=64, shuffle=True)
-test_loader = DataLoader(test_subset, batch_size=64, shuffle=False)
+model_conv, hist_conv = train_detector(sim_conv, labels)
+model_trans, hist_trans = train_detector(sim_trans, labels)
 
-print("Data ready (FAST MODE)")
+pred_conv = model_conv(torch.tensor(sim_conv).float().unsqueeze(1)).argmax(1).numpy()
+pred_trans = model_trans(torch.tensor(sim_trans).float().unsqueeze(1)).argmax(1).numpy()
+pred_hash = hash_baseline(X_train, X_test)
 
-class CNNFeatureExtractor(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.model = nn.Sequential(
-            nn.Conv2d(3,32,3,padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
+plot_confusion(labels, pred_conv, "confusion_conv.png")
+plot_confusion(labels, pred_trans, "confusion_transformer.png")
 
-            nn.Conv2d(32,64,3,padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
+plot_accuracy(hist_conv, "conv_accuracy.png")
+plot_accuracy(hist_trans, "transformer_accuracy.png")
 
-            nn.Flatten(),
-            nn.Linear(64*56*56,64)  # reduced size
-        )
+results = {
+    "hash": (pred_hash==labels).mean(),
+    "conv": (pred_conv==labels).mean(),
+    "transformer": (pred_trans==labels).mean()
+}
 
-    def forward(self, x):
-        return self.model(x)
+plot_comparison(results)
 
-cnn_model = CNNFeatureExtractor().to(device)
-
-
-vit_model = timm.create_model('vit_tiny_patch16_224', pretrained=True)
-vit_model.reset_classifier(0)
-vit_model = vit_model.to(device)
-vit_model.eval()
-
-print("Tiny ViT ready")
-
-def extract_features(model, loader):
-    model.eval()
-    features = []
-
-    with torch.no_grad():
-        for images, _ in loader:
-            images = images.to(device)
-            feats = model(images)
-            features.append(feats.cpu().numpy())
-
-    return np.vstack(features)
-
-print("Extracting CNN features...")
-cnn_train = extract_features(cnn_model, train_loader)
-cnn_test = extract_features(cnn_model, test_loader)
-
-print("Extracting ViT features...")
-vit_train = extract_features(vit_model, train_loader)
-vit_test = extract_features(vit_model, test_loader)
-
-def compute_similarity(train_f, test_f):
-    sim = cosine_similarity(test_f, train_f)
-    return sim.max(axis=1)
-
-cnn_sim = compute_similarity(cnn_train, cnn_test)
-vit_sim = compute_similarity(vit_train, vit_test)
-
-labels = np.zeros(len(test_subset))
-labels[:int(0.2 * len(test_subset))] = 1
-
-def evaluate(sim, labels, threshold=0.9):
-    preds = (sim > threshold).astype(int)
-
-    print("Accuracy:", accuracy_score(labels, preds))
-    print("Precision:", precision_score(labels, preds))
-    print("Recall:", recall_score(labels, preds))
-    print("F1:", f1_score(labels, preds))
-
-print("=== CNN RESULTS ===")
-evaluate(cnn_sim, labels)
-
-print("\n=== ViT RESULTS ===")
-evaluate(vit_sim, labels)
-
-import matplotlib.pyplot as plt
-
-def plot_similarity(sim, labels, title):
-    leaked = sim[labels == 1]
-    clean = sim[labels == 0]
-
-    plt.figure()
-
-    plt.hist(
-        leaked,
-        bins=30,
-        alpha=0.6,
-        label="Leaked",
-        color='red',
-        edgecolor='black'
-    )
-
-    plt.hist(
-        clean,
-        bins=30,
-        alpha=0.6,
-        label="Clean",
-        color='dodgerblue',
-        edgecolor='black'
-    )
-
-    plt.title(title)
-    plt.xlabel("Cosine Similarity")
-    plt.ylabel("Count")
-    plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.4)
-    plt.show()
-
-plot_similarity(cnn_sim, labels, "CNN Similarity Distribution")
-plot_similarity(vit_sim, labels, "ViT Similarity Distribution")
-
-
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-
-def plot_confusion(sim, labels, threshold=0.9, title="Confusion Matrix"):
-    preds = (sim > threshold).astype(int)
-    cm = confusion_matrix(labels, preds)
-
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm)
-    disp.plot(cmap='Blues')  # strong contrast blue scale
-
-    plt.title(title)
-    plt.grid(False)
-    plt.show()
-
-plot_confusion(cnn_sim, labels, title="CNN Confusion Matrix")
-plot_confusion(vit_sim, labels, title="ViT Confusion Matrix")
-
-from sklearn.metrics import roc_curve, auc
-
-def plot_roc(sim, labels, title):
-    fpr, tpr, _ = roc_curve(labels, sim)
-    roc_auc = auc(fpr, tpr)
-
-    plt.figure()
-
-    plt.plot(
-        fpr, tpr,
-        color='red',
-        linewidth=2,
-        label=f"AUC = {roc_auc:.2f}"
-    )
-
-    plt.plot(
-        [0, 1], [0, 1],
-        color='black',
-        linestyle='--'
-    )
-
-    plt.xlabel("False Positive Rate")
-    plt.ylabel("True Positive Rate")
-    plt.title(title)
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.show()
-
-plot_roc(cnn_sim, labels, "CNN ROC Curve")
-plot_roc(vit_sim, labels, "ViT ROC Curve")
+print(results)
